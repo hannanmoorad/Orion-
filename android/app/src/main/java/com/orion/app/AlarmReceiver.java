@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 
 import java.util.Locale;
 
@@ -39,7 +40,7 @@ public class AlarmReceiver extends BroadcastReceiver implements TextToSpeech.OnI
             try {
                 tts.setLanguage(Locale.ENGLISH);
                 tts.setSpeechRate(1.0f);
-                tts.setOnUtteranceProgressListener(new TextToSpeech.OnUtteranceProgressListener() {
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                     @Override
                     public void onStart(String utteranceId) {}
 
