@@ -19,7 +19,7 @@ import {
 } from './services/access'
 import { respond, timeToHuman, defaultWakeMessage, PROACTIVE } from './brain/OrionBrain'
 import { groqReply, groqPing, rememberUser, rememberOrion } from './services/groq'
-import { subscribeSpeech, startListening, stopListening, speechAvailable, speechPermissionState } from './services/speech'
+import { subscribeSpeech, startListening, stopListening, speechAvailable, speechPermissionState, setContinuous, continuousActive } from './services/speech'
 import OrionAvatar from './components/OrionAvatar'
 
 const WAKE_NAMES = /orion|orian|aryan|arian|oren|aurion|orien|oreo|and wee|arion/i
@@ -83,7 +83,7 @@ function useSpeech(onFinal, lang = 'en-US') {
         }
         gotFinalRef.current = false
         listeningRef.current = false
-        setListening(false)
+        if (!continuousActive()) setListening(false)
         setLive('')
       }
     })
@@ -221,9 +221,39 @@ function ChatScreen({ config, onAlarm, onMemory, notify }) {
   ])
   const [avatar, setAvatar] = useState('idle')
   const [typed, setTyped] = useState('')
+  const [alwaysOn, setAlwaysOn] = useState(false)
+  const [clock, setClock] = useState('')
   const endRef = useRef(null)
   const greetedRef = useRef(false)
   const listeningRef = useRef(false)
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      const d = new Date()
+      setClock(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    }, 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      setContinuous(false)
+      stopListening()
+    }
+  }, [])
+
+  function toggleAlways() {
+    const v = !alwaysOn
+    setAlwaysOn(v)
+    if (v) {
+      setContinuous(true)
+      startListening(config.lang)
+    } else {
+      setContinuous(false)
+      stopListening()
+    }
+    if (notify) notify(v ? 'JARVIS mode ON — hamesha sun raha hun. Bolte raho!' : 'JARVIS mode OFF.')
+  }
 
   useEffect(() => {
     listeningRef.current = listening
@@ -381,11 +411,18 @@ function ChatScreen({ config, onAlarm, onMemory, notify }) {
 
   return (
     <div className="screen">
+      <div className="hud-row">
+        <span className="hud-item online">● ONLINE</span>
+        <span className="hud-item">{clock}</span>
+        <span className="hud-item">{alwaysOn ? 'ALWAYS LISTENING' : listening ? 'LISTENING' : 'STANDBY'}</span>
+      </div>
       <div className="chat-head">
-        <OrionAvatar state={avatar} size="sm" />
+        <div className="jarvis-scan">
+          <OrionAvatar state={alwaysOn || listening ? 'listening' : avatar} size="sm" />
+        </div>
         <div className="chat-head-txt">
-          <strong>Orion — bhai</strong>
-          <span className="chat-head-sub">{listening ? 'Sun raha hun...' : 'Orion Brain ON'}</span>
+          <strong>ORION • {config.name}'s bhai</strong>
+          <span className="chat-head-sub">{alwaysOn ? 'Hamesha sun raha hun — bolo bas' : listening ? 'Sun raha hun...' : 'Orion Brain ON — khud bhi bolta hai'}</span>
         </div>
       </div>
       <div className="chat-body">
@@ -398,7 +435,7 @@ function ChatScreen({ config, onAlarm, onMemory, notify }) {
         <div ref={endRef} />
       </div>
       <div className="micbar">
-        <LiveLine listening={listening} live={live} err={err} />
+        <LiveLine listening={listening || alwaysOn} live={live} err={err} />
         <div className="type-row">
           <input
             className="field type-input"
@@ -411,9 +448,14 @@ function ChatScreen({ config, onAlarm, onMemory, notify }) {
           />
           <button className="send-btn" onClick={sendTyped}>➤</button>
         </div>
-        <button className={`mic ${listening ? 'live' : ''}`} onClick={start}>
-          {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
-        </button>
+        <div className="mic-row">
+          <button className={`mic ${listening || alwaysOn ? 'live' : ''}`} onClick={start}>
+            {listening || alwaysOn ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
+          </button>
+          <button className={`always-btn ${alwaysOn ? 'on' : ''}`} onClick={toggleAlways}>
+            {alwaysOn ? '⏸ Hamesha sunna band' : '⏺ JARVIS mode — hamesha suno'}
+          </button>
+        </div>
         <p className="mic-hint">Bolo ya likho: "12 baje utha dena" • "WhatsApp kholo" • "call 03001234567"</p>
       </div>
     </div>

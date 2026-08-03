@@ -3,17 +3,25 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition'
 
 const hub = new Set()
 let listeners = null
-const subs = new Set()
+let continuousOn = false
+let activeLang = 'en-US'
+
+export function setContinuous(v) {
+  continuousOn = !!v
+}
+
+export function continuousActive() {
+  return continuousOn
+}
 
 async function ensureListeners() {
   if (listeners || !Capacitor.isNativePlatform()) return
   try {
     await SpeechRecognition.requestPermissions()
   } catch {}
-  let onResult, onPartial, onError, onEnd
   const regs = []
   try {
-    onResult = await SpeechRecognition.addListener('onResult', (data) => {
+    const onResult = await SpeechRecognition.addListener('onResult', (data) => {
       if (data.matches && data.matches.length) {
         const first = data.matches[0]
         hub.forEach((cb) => cb.onResult && cb.onResult(first))
@@ -22,7 +30,7 @@ async function ensureListeners() {
     regs.push(onResult)
   } catch {}
   try {
-    onPartial = await SpeechRecognition.addListener('partialResults', (data) => {
+    const onPartial = await SpeechRecognition.addListener('partialResults', (data) => {
       if (data.matches && data.matches.length) {
         const first = data.matches[0]
         hub.forEach((cb) => cb.onPartial && cb.onPartial(first))
@@ -31,14 +39,30 @@ async function ensureListeners() {
     regs.push(onPartial)
   } catch {}
   try {
-    onError = await SpeechRecognition.addListener('onError', (data) => {
+    const onError = await SpeechRecognition.addListener('onError', (data) => {
       hub.forEach((cb) => cb.onError && cb.onError(data))
     })
     regs.push(onError)
   } catch {}
   try {
-    onEnd = await SpeechRecognition.addListener('onEnd', () => {
+    const onEnd = await SpeechRecognition.addListener('onEnd', () => {
       hub.forEach((cb) => cb.onEnd && cb.onEnd())
+      if (continuousOn && Capacitor.isNativePlatform()) {
+        try {
+          SpeechRecognition.stop()
+        } catch {}
+        setTimeout(async () => {
+          if (!continuousOn) return
+          try {
+            await SpeechRecognition.start({
+              language: activeLang,
+              maxResults: 5,
+              partialResults: true,
+              popup: false
+            })
+          } catch {}
+        }, 700)
+      }
     })
     regs.push(onEnd)
   } catch {}
@@ -69,8 +93,6 @@ export function subscribeSpeech(cb) {
   return () => hub.delete(cb)
 }
 
-let activeLang = 'en-US'
-
 export async function startListening(lang) {
   await ensureListeners()
   if (lang) activeLang = lang
@@ -95,6 +117,7 @@ export async function startListening(lang) {
 }
 
 export async function stopListening() {
+  setContinuous(false)
   try {
     await SpeechRecognition.stop()
   } catch {}
