@@ -36,3 +36,23 @@ export async function cancelAlarm(id) {
 }
 
 export { OrionAlarm }
+
+export async function requestNotificationPermission() {
+  if (!Capacitor.isNativePlatform()) return true
+  try {
+    await OrionAlarm.requestNotificationPermission()
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function hasNotificationPermission() {
+  if (!Capacitor.isNativePlatform()) return true
+  try {
+    const r = await OrionAlarm.checkNotificationPermission()
+    return !!r.granted
+  } catch {
+    return false
+  }
+}

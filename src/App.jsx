@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { SpeechRecognition } from '@capacitor-community/speech-recognition'
 import { getJSON, setJSON } from './services/storage'
 import { speak, stopSpeaking } from './services/voice'
-import { scheduleAlarm, cancelAlarm, OrionAlarm } from './services/alarm'
+import { scheduleAlarm, cancelAlarm, OrionAlarm, requestNotificationPermission } from './services/alarm'
 import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
 
 const PHRASE = 'orion wake up'
@@ -17,64 +17,97 @@ function matchesPhrase(s) {
   return /orion/.test(n) && /(wake|suno|uth|listen)/i.test(s)
 }
 
-function useSpeech(onResult) {
+function useSpeech(onFinal, lang = 'en-US') {
   const [listening, setListening] = useState(false)
+  const [live, setLive] = useState('')
   const listeningRef = useRef(false)
-  const handlerRef = useRef(onResult)
-  handlerRef.current = onResult
+  const liveRef = useRef('')
+  const gotFinalRef = useRef(false)
+  const langRef = useRef(lang)
+  langRef.current = lang
+  const finalRef = useRef(onFinal)
+  finalRef.current = onFinal
+
+  function setLiveText(t) {
+    liveRef.current = t
+    setLive(t)
+  }
 
   useEffect(() => {
-    let resultListener
-    let endListener
+    const listeners = []
     ;(async () => {
       try {
         await SpeechRecognition.requestPermissions()
       } catch {}
       if (!Capacitor.isNativePlatform()) return
-      resultListener = await SpeechRecognition.addListener('onResult', (data) => {
-        if (data.matches && data.matches.length) handlerRef.current(data.matches[0])
-      })
-      endListener = await SpeechRecognition.addListener('onEnd', () => {
+      listeners.push(await SpeechRecognition.addListener('onResult', (data) => {
+        gotFinalRef.current = true
+        setLiveText('')
+        if (data.matches && data.matches.length) finalRef.current(data.matches[0])
+      }))
+      listeners.push(await SpeechRecognition.addListener('partialResults', (data) => {
+        if (data.matches && data.matches.length) setLiveText(data.matches[0])
+      }))
+      listeners.push(await SpeechRecognition.addListener('onError', () => {
+        gotFinalRef.current = true
+        setLiveText('')
+      }))
+      listeners.push(await SpeechRecognition.addListener('onEnd', () => {
+        if (!gotFinalRef.current && liveRef.current) {
+          finalRef.current(liveRef.current)
+        }
+        gotFinalRef.current = false
         listeningRef.current = false
         setListening(false)
-      })
+        setLiveText('')
+      }))
     })()
-
     return () => {
-      if (resultListener) resultListener.remove()
-      if (endListener) endListener.remove()
+      listeners.forEach((l) => l && l.remove())
     }
   }, [])
 
   async function start() {
     if (listeningRef.current) {
-      try { await SpeechRecognition.stop() } catch {}
+      try {
+        await SpeechRecognition.stop()
+      } catch {}
       listeningRef.current = false
       setListening(false)
+      setLiveText('')
       return
     }
     if (!Capacitor.isNativePlatform()) {
       setListening(true)
       listeningRef.current = true
+      setLiveText('')
       setTimeout(() => {
         const t = window.prompt('Dev mode — boliye: Orion wake up')
         listeningRef.current = false
         setListening(false)
-        if (t) handlerRef.current(t)
+        setLiveText('')
+        if (t) finalRef.current(t)
       }, 300)
       return
     }
     try {
-      await SpeechRecognition.start({ language: 'en-US', maxResults: 1, partialResults: true, popup: false })
+      await SpeechRecognition.start({ language: langRef.current, maxResults: 3, partialResults: true, popup: false })
       listeningRef.current = true
       setListening(true)
+      setLiveText('')
     } catch {
       listeningRef.current = false
       setListening(false)
+      setLiveText('')
     }
   }
 
-  return { listening, start }
+  return { listening, live, start }
+}
+
+function LiveLine({ listening, live }) {
+  if (!listening) return null
+  return <p className="live-text">Sun raha hun: "{live || '...'}"</p>
 }
 
 function EmptyState({ title, sub }) {
@@ -104,6 +137,35 @@ function TabBar({ tab, setTab }) {
   )
 }
 
+function PermissionsBox({ notify }) {
+  async function requestMic() {
+    try {
+      await SpeechRecognition.requestPermissions()
+      notify('Microphone: aapne allow kiya? Agar popup aya to Allow dabao.')
+    } catch (e) {
+      notify('Mic error: ' + (e.message || 'unknown'))
+    }
+  }
+
+  async function requestNotif() {
+    try {
+      await requestNotificationPermission()
+      notify('Notifications: popup par Allow dabao.')
+    } catch (e) {
+      notify('Notification error: ' + (e.message || 'unknown'))
+    }
+  }
+
+  return (
+    <div className="panel">
+      <h2>Permissions — sab allow karo</h2>
+      <button className="ghost" onClick={requestMic}>Microphone</button>
+      <button className="ghost" onClick={requestNotif}>Notifications</button>
+      <p className="about">Alarm: exact time ki permission Android mein khud granted hai (USE_EXACT_ALARM).</p>
+    </div>
+  )
+}
+
 function ChatScreen({ config, onAlarm, onMemory }) {
   const [messages, setMessages] = useState([
     { role: 'orion', text: `Haan bhai ${config.name}, main Orion hun. Bolo — "12 baje utha dena", ya "yaad rakhna dinner lana", ya bas gupshup.` }
@@ -122,13 +184,13 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     const { reply, action } = respond(text, { name: config.name, now })
     setTimeout(() => {
       setMessages((m) => [...m, { role: 'orion', text: reply }])
-      speak(reply)
+      speak(reply, config.lang)
     }, 300)
     if (action && action.type === 'alarm') onAlarm(action)
     if (action && action.type === 'memory') onMemory(action.text)
   }
 
-  const { listening, start } = useSpeech(handleInput)
+  const { listening, live, start } = useSpeech(handleInput, config.lang)
 
   return (
     <div className="screen">
@@ -142,6 +204,7 @@ function ChatScreen({ config, onAlarm, onMemory }) {
         <div ref={endRef} />
       </div>
       <div className="micbar">
+        <LiveLine listening={listening} live={live} />
         <button className={`mic ${listening ? 'live' : ''}`} onClick={start}>
           {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
         </button>
@@ -284,6 +347,7 @@ function MemoryScreen({ notify }) {
 function SettingsScreen({ config, setConfig, notify }) {
   const [name, setName] = useState(config.name)
   const [lock, setLock] = useState(config.voiceLock)
+  const [lang, setLang] = useState(config.lang || 'en-US')
   const [testing, setTesting] = useState(false)
 
   async function saveName() {
@@ -291,6 +355,12 @@ function SettingsScreen({ config, setConfig, notify }) {
     setConfig((c) => ({ ...c, name: nm }))
     setJSON('config', { ...config, name: nm })
     notify('Naam save ho gaya bhai.')
+  }
+
+  function saveLang() {
+    setConfig((c) => ({ ...c, lang }))
+    setJSON('config', { ...config, lang })
+    notify('Language set: ' + lang)
   }
 
   function toggleLock() {
@@ -303,7 +373,7 @@ function SettingsScreen({ config, setConfig, notify }) {
 
   async function testVoice() {
     setTesting(true)
-    await speak('Haan bhai! Main Orion hun, tumhara bhai. Ye meri awaaz hai.')
+    await speak('Haan bhai! Main Orion hun, tumhara bhai. Ye meri awaaz hai.', config.lang)
     setTimeout(() => setTesting(false), 6000)
   }
 
@@ -315,6 +385,14 @@ function SettingsScreen({ config, setConfig, notify }) {
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="primary" onClick={saveName}>Naam save karo</button>
 
+        <label className="lbl">Awaaz ki language (voice recognition)</label>
+        <select className="field" value={lang} onChange={(e) => setLang(e.target.value)}>
+          <option value="en-US">English (US) — recommended</option>
+          <option value="ur-PK">Urdu (Pakistan)</option>
+          <option value="hi-IN">Hindi</option>
+        </select>
+        <button className="ghost" onClick={saveLang}>Language save karo</button>
+
         <label className="row spacer">
           <input type="checkbox" checked={lock} onChange={toggleLock} />
           <span>Voice lock — sirf aapki awaaz ("Orion wake up")</span>
@@ -323,22 +401,23 @@ function SettingsScreen({ config, setConfig, notify }) {
         <button className="ghost" onClick={testVoice}>{testing ? 'Bol raha hun...' : 'Awaaz test karo'}</button>
         <button className="ghost" onClick={() => stopSpeaking()}>Bolna band karo</button>
 
-        <p className="about">Orion v1.0 — aapka AI bhai. Alarm, yaad-dasht, awaaz. Kuch bhi bolo.</p>
+        <p className="about">Orion v1.1 — aapka AI bhai. Alarm, yaad-dasht, awaaz. Kuch bhi bolo.</p>
       </div>
+      <PermissionsBox notify={notify} />
     </div>
   )
 }
 
-function VoiceGate({ onUnlocked, notify }) {
+function VoiceGate({ onUnlocked, notify, lang }) {
   const [tries, setTries] = useState(0)
-  const { listening, start } = useSpeech((t) => {
+  const { listening, live, start } = useSpeech((t) => {
     if (matchesPhrase(t)) {
       notify('Mil gaya bhai!')
       onUnlocked()
     } else {
       setTries((s) => s + 1)
     }
-  })
+  }, lang)
 
   return (
     <div className="gate">
@@ -347,6 +426,7 @@ function VoiceGate({ onUnlocked, notify }) {
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start}>
         {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
       </button>
+      <LiveLine listening={listening} live={live} />
       {tries > 0 && <p className="gate-hint">Nahi samjha — phir se bolo, sukoon se.</p>}
     </div>
   )
@@ -356,7 +436,7 @@ function SetupScreen({ onDone, notify }) {
   const [name, setName] = useState('Hannan')
   const [sample, setSample] = useState(0)
   const [lock, setLock] = useState(true)
-  const { listening, start } = useSpeech((t) => {
+  const { listening, live, start } = useSpeech((t) => {
     if (sample >= 3) return
     if (matchesPhrase(t)) {
       setSample((s) => s + 1)
@@ -367,7 +447,7 @@ function SetupScreen({ onDone, notify }) {
 
   async function finish() {
     const nm = name.trim() || 'Hannan'
-    setJSON('config', { name: nm, voiceLock: lock, setupDone: true, samples: sample })
+    setJSON('config', { name: nm, voiceLock: lock, setupDone: true, samples: sample, lang: 'en-US' })
     onDone()
   }
 
@@ -381,6 +461,7 @@ function SetupScreen({ onDone, notify }) {
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start} disabled={sample >= 3}>
         {listening ? 'Record ho raha hai...' : sample >= 3 ? 'Ho gaya!' : `Boliye: "${PHRASE}" — (${sample}/3)`}
       </button>
+      <LiveLine listening={listening} live={live} />
       {sample < 3 && <p className="gate-hint">Mic dabayen, phir bolo: Orion wake up</p>}
 
       {sample >= 3 && (
@@ -389,6 +470,7 @@ function SetupScreen({ onDone, notify }) {
             <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} />
             <span>Voice lock ON — sirf meri awaaz</span>
           </label>
+          <PermissionsBox notify={notify} />
           <button className="primary" onClick={finish}>Orion shuru karo</button>
         </div>
       )}
@@ -397,7 +479,7 @@ function SetupScreen({ onDone, notify }) {
 }
 
 export default function App() {
-  const [config, setConfig] = useState({ name: 'Hannan', voiceLock: true, setupDone: false })
+  const [config, setConfig] = useState({ name: 'Hannan', voiceLock: true, setupDone: false, lang: 'en-US' })
   const [tab, setTab] = useState('chat')
   const [unlocked, setUnlocked] = useState(false)
   const [toast, setToast] = useState('')
@@ -405,13 +487,13 @@ export default function App() {
   useEffect(() => {
     ;(async () => {
       const c = await getJSON('config', null)
-      if (c) setConfig(c)
+      if (c) setConfig((prev) => ({ ...prev, ...c }))
     })()
   }, [])
 
   function notify(msg) {
     setToast(msg)
-    setTimeout(() => setToast(''), 3000)
+    setTimeout(() => setToast(''), 3500)
   }
 
   function handleAlarm(a) {
@@ -428,7 +510,7 @@ export default function App() {
   }
 
   if (config.voiceLock && !unlocked) {
-    return <VoiceGate onUnlocked={() => setUnlocked(true)} notify={notify} />
+    return <VoiceGate onUnlocked={() => setUnlocked(true)} notify={notify} lang={config.lang} />
   }
 
   return (

@@ -1,10 +1,15 @@
 package com.orion.app;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
+
+import androidx.core.app.ActivityCompat;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -99,5 +104,26 @@ public class OrionAlarmPlugin extends Plugin {
             out.put(e.getKey(), String.valueOf(e.getValue()));
         }
         call.resolve(out);
+    }
+
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 33 && getActivity() != null) {
+            ActivityCompat.requestPermissions(getActivity(),
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void checkNotificationPermission(PluginCall call) {
+        boolean granted = true;
+        if (Build.VERSION.SDK_INT >= 33) {
+            granted = getContext().checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        call.resolve(ret);
     }
 }

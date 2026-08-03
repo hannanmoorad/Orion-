@@ -329,6 +329,18 @@ input[type='checkbox'] {
   margin-top: 8px;
 }
 
+.live-text {
+  text-align: center;
+  font-size: 13px;
+  color: var(--accent2);
+  background: rgba(155, 108, 255, 0.08);
+  border: 1px dashed #3a3f6b;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  min-height: 34px;
+}
+
 .gate {
   height: 100dvh;
   display: flex;
