@@ -1,0 +1,8 @@
+{
+  "appId": "com.orion.app",
+  "appName": "Orion",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  }
+}
