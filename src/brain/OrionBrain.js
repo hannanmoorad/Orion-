@@ -73,7 +73,7 @@ export function respond(raw, { name = 'Hannan', now = new Date() } = {}) {
   }
 
   if (/yaad rakh|yaad rakho|remember/i.test(text)) {
-    const memo = raw.replace(/^(ivan|orion)[,\s]*/i, '').replace(/^(yaad rakh|yaad rakho|remember)[,\s]*/i, '').replace(/^:/, '').trim() || raw.trim()
+    const memo = raw.replace(/^(ivan|orion)[,\s]*/i, '').replace(/^(yaad rakhna|yaad rakh|yaad rakho|remember)[,\s]*/i, '').replace(/^:/, '').trim() || raw.trim()
     result.reply = `Yaad rakh liya: "${memo}". Jab zaroorat padegi, main bata dunga.`
     result.action = { type: 'memory', text: memo }
     return result

@@ -21,13 +21,19 @@ import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
 
 const PHRASE = 'orion wake up'
 
+const WAKE_NAMES = /orion|orian|aryan|arian|oren|aurion|orien|oreo|and wee|arion/i
+const WAKE_VERBS = /wake( up)?|suno|sun|utho|utha|uth|listen|hey|hello|open|shuru|start|up/i
+
 function normalize(s) {
   return (s || '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function matchesPhrase(s) {
+function matchesWake(s) {
   const n = normalize(s)
-  return /orion/.test(n) && /(wake|suno|uth|listen)/i.test(s)
+  if (!n) return false
+  if (WAKE_NAMES.test(n)) return true
+  if (WAKE_VERBS.test(" " + n + " ")) return true
+  return n.includes('orion') && n.includes('wake')
 }
 
 function useSpeech(onFinal, lang = 'en-US') {
@@ -196,14 +202,34 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     if (endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  async function remoteReply(text) {
+    if (!config.apiUrl) return null
+    try {
+      const res = await fetch(config.apiUrl + '/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, name: config.name, lang: config.lang })
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.reply || null
+    } catch {
+      return null
+    }
+  }
+
   function handleInput(raw) {
     if (!raw || !raw.trim()) return
     const text = raw.trim()
     setMessages((m) => [...m, { role: 'user', text }])
     const now = new Date()
-    const { reply, action } = respond(text, { name: config.name, now })
-    say(reply)
-    handleAction(action)
+    const local = respond(text, { name: config.name, now })
+    handleAction(local.action)
+    if (config.apiUrl) {
+      remoteReply(text).then((reply) => say(reply || local.reply))
+    } else {
+      say(local.reply)
+    }
   }
 
   function say(text) {
@@ -520,6 +546,7 @@ function SettingsScreen({ config, setConfig, notify }) {
   const [name, setName] = useState(config.name)
   const [lock, setLock] = useState(config.voiceLock)
   const [lang, setLang] = useState(config.lang || 'en-US')
+  const [server, setServer] = useState(config.apiUrl || '')
   const [testing, setTesting] = useState(false)
 
   async function saveName() {
@@ -527,6 +554,13 @@ function SettingsScreen({ config, setConfig, notify }) {
     setConfig((c) => ({ ...c, name: nm }))
     setJSON('config', { ...config, name: nm })
     notify('Naam save ho gaya bhai.')
+  }
+
+  function saveServer() {
+    const url = server.trim().replace(/\/+$/, '')
+    setConfig((c) => ({ ...c, apiUrl: url }))
+    setJSON('config', { ...config, apiUrl: url })
+    notify(url ? 'Orion server set: ' + url : 'Local brain chalta rahega.')
   }
 
   function saveLang() {
@@ -557,6 +591,15 @@ function SettingsScreen({ config, setConfig, notify }) {
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="primary" onClick={saveName}>Naam save karo</button>
 
+        <label className="lbl">Orion server (optional) — Python backend ka URL</label>
+        <input
+          className="field"
+          value={server}
+          onChange={(e) => setServer(e.target.value)}
+          placeholder="https://orion-api.up.railway.app"
+        />
+        <button className="ghost" onClick={saveServer}>Server save karo</button>
+
         <label className="lbl">Awaaz ki language (voice recognition)</label>
         <select className="field" value={lang} onChange={(e) => setLang(e.target.value)}>
           <option value="en-US">English (US) — recommended</option>
@@ -567,13 +610,13 @@ function SettingsScreen({ config, setConfig, notify }) {
 
         <label className="row spacer">
           <input type="checkbox" checked={lock} onChange={toggleLock} />
-          <span>Voice lock — sirf aapki awaaz ("Orion wake up")</span>
+          <span>Voice lock — sirf aapki awaaz ("hey Orion")</span>
         </label>
 
         <button className="ghost" onClick={testVoice}>{testing ? 'Bol raha hun...' : 'Awaaz test karo'}</button>
         <button className="ghost" onClick={() => stopSpeaking()}>Bolna band karo</button>
 
-        <p className="about">Orion v1.1 — aapka AI bhai. Alarm, yaad-dasht, awaaz. Kuch bhi bolo.</p>
+        <p className="about">Orion v1.3 — aapka AI bhai. Alarm, yaad-dasht, awaaz, apps, Python server. Kuch bhi bolo.</p>
       </div>
       <PermissionsBox notify={notify} />
       <AccessPanel notify={notify} />
@@ -583,8 +626,9 @@ function SettingsScreen({ config, setConfig, notify }) {
 
 function VoiceGate({ onUnlocked, notify, lang }) {
   const [tries, setTries] = useState(0)
-  const { listening, live, start } = useSpeech((t) => {
-    if (matchesPhrase(t)) {
+  const [typed, setTyped] = useState('')
+  const { listening, live, err, start } = useSpeech((t) => {
+    if (matchesWake(t)) {
       notify('Mil gaya bhai!')
       onUnlocked()
     } else {
@@ -595,12 +639,34 @@ function VoiceGate({ onUnlocked, notify, lang }) {
   return (
     <div className="gate">
       <h1>ORION</h1>
-      <p className="gate-sub">Voice lock ON hai. Boliye: "Orion wake up"</p>
+      <p className="gate-sub">Voice lock ON hai. Bolo: "Orion wake up" — ya bas "hey Orion", "Orion suno"</p>
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start}>
         {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
       </button>
-      <LiveLine listening={listening} live={live} />
-      {tries > 0 && <p className="gate-hint">Nahi samjha — phir se bolo, sukoon se.</p>}
+      <LiveLine listening={listening} live={live} err={err} />
+      {tries > 0 && <p className="gate-hint">Nahi samjha — phir se bolo, ya neeche type karo.</p>}
+      {tries >= 1 && (
+        <div className="gate-typed">
+          <input
+            className="field center"
+            placeholder='Type karo: "orion"'
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+          <button
+            className="ghost"
+            onClick={() => {
+              if (typed.trim()) {
+                notify('Mil gaya bhai!')
+                onUnlocked()
+              }
+            }}
+          >
+            Unlock karo
+          </button>
+        </div>
+      )}
+      <p className="gate-hint">Awaaz pakad nahi rahi? Mic permission + Google app check karo, ya Settings mein "Voice lock" OFF kar do.</p>
     </div>
   )
 }
@@ -609,12 +675,12 @@ function SetupScreen({ onDone, notify }) {
   const [name, setName] = useState('Hannan')
   const [sample, setSample] = useState(0)
   const [lock, setLock] = useState(true)
-  const { listening, live, start } = useSpeech((t) => {
+  const { listening, live, err, start } = useSpeech((t) => {
     if (sample >= 3) return
-    if (matchesPhrase(t)) {
+    if (matchesWake(t)) {
       setSample((s) => s + 1)
     } else {
-      notify('Nahi samjha — "Orion wake up" bolo.')
+      notify('Nahi samjha — "hey Orion" ya "orion wake up" bolo.')
     }
   })
 
@@ -632,10 +698,10 @@ function SetupScreen({ onDone, notify }) {
 
       <p className="gate-group">Ab awaaz match karein — "Orion wake up" boliye, 3 baar:</p>
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start} disabled={sample >= 3}>
-        {listening ? 'Record ho raha hai...' : sample >= 3 ? 'Ho gaya!' : `Boliye: "${PHRASE}" — (${sample}/3)`}
+        {listening ? 'Record ho raha hai...' : sample >= 3 ? 'Ho gaya!' : `Boliye: "hey Orion" — (${sample}/3)`}
       </button>
-      <LiveLine listening={listening} live={live} />
-      {sample < 3 && <p className="gate-hint">Mic dabayen, phir bolo: Orion wake up</p>}
+      <LiveLine listening={listening} live={live} err={err} />
+      {sample < 3 && <p className="gate-hint">Mic dabayen, phir bolo: hey Orion, ya Orion wake up, ya Orion suno</p>}
 
       {sample >= 3 && (
         <div className="setup-final">
