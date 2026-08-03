@@ -7,3 +7,8 @@ android/local.properties
 android/capacitor-cordova-android-plugins/build/
 *.log
 .DS_Store
+
+platform-tools/
+Orion-APK.apk
+Orion-APK.zip
+apk-out/

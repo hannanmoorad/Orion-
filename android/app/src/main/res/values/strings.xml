@@ -4,4 +4,6 @@
     <string name="title_activity_main">Orion</string>
     <string name="package_name">com.orion.app</string>
     <string name="custom_url_scheme">com.orion.app</string>
+    <string name="accessibility_desc">Orion ko ye permission do taake wo screen par likhi cheezein parh sakey, kisi bhi app mein type kar sakey, apps khol sakey aur buttons daba sakey. Aapka data sirf aapke phone par rehta hai.</string>
+    <string name="notif_listener_desc">Orion notifications parh kar aapko bata sakey ke kya aaya hai.</string>
 </resources>

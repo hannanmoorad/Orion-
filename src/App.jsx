@@ -4,6 +4,19 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition'
 import { getJSON, setJSON } from './services/storage'
 import { speak, stopSpeaking } from './services/voice'
 import { scheduleAlarm, cancelAlarm, OrionAlarm, requestNotificationPermission } from './services/alarm'
+import {
+  getAccessStatus,
+  requestPerm,
+  openAccessibilitySettings,
+  openNotificationListenerSettings,
+  readScreen,
+  typeText,
+  openPackage,
+  doCall,
+  doSms,
+  getContacts,
+  getNotifications
+} from './services/access'
 import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
 
 const PHRASE = 'orion wake up'
@@ -20,6 +33,7 @@ function matchesPhrase(s) {
 function useSpeech(onFinal, lang = 'en-US') {
   const [listening, setListening] = useState(false)
   const [live, setLive] = useState('')
+  const [err, setErr] = useState('')
   const listeningRef = useRef(false)
   const liveRef = useRef('')
   const gotFinalRef = useRef(false)
@@ -31,6 +45,7 @@ function useSpeech(onFinal, lang = 'en-US') {
   function setLiveText(t) {
     liveRef.current = t
     setLive(t)
+    if (t) setErr('')
   }
 
   useEffect(() => {
@@ -48,9 +63,10 @@ function useSpeech(onFinal, lang = 'en-US') {
       listeners.push(await SpeechRecognition.addListener('partialResults', (data) => {
         if (data.matches && data.matches.length) setLiveText(data.matches[0])
       }))
-      listeners.push(await SpeechRecognition.addListener('onError', () => {
+      listeners.push(await SpeechRecognition.addListener('onError', (data) => {
         gotFinalRef.current = true
         setLiveText('')
+        setErr('Voice samajh nahi aayi (error ' + (data && data.error != null ? data.error : '?') + '). Mic permission ON hai? Google app installed hai?')
       }))
       listeners.push(await SpeechRecognition.addListener('onEnd', () => {
         if (!gotFinalRef.current && liveRef.current) {
@@ -75,6 +91,7 @@ function useSpeech(onFinal, lang = 'en-US') {
       listeningRef.current = false
       setListening(false)
       setLiveText('')
+      setErr('')
       return
     }
     if (!Capacitor.isNativePlatform()) {
@@ -91,21 +108,24 @@ function useSpeech(onFinal, lang = 'en-US') {
       return
     }
     try {
-      await SpeechRecognition.start({ language: langRef.current, maxResults: 3, partialResults: true, popup: false })
+      await SpeechRecognition.start({ language: langRef.current, maxResults: 3, partialResults: true, popup: true })
       listeningRef.current = true
       setListening(true)
       setLiveText('')
-    } catch {
+      setErr('')
+    } catch (e) {
       listeningRef.current = false
       setListening(false)
       setLiveText('')
+      setErr('Speech engine start nahi hua: ' + (e.message || 'unknown') + '. Google app check karo.')
     }
   }
 
-  return { listening, live, start }
+  return { listening, live, err, start }
 }
 
-function LiveLine({ listening, live }) {
+function LiveLine({ listening, live, err }) {
+  if (err) return <p className="live-text err">{err}</p>
   if (!listening) return null
   return <p className="live-text">Sun raha hun: "{live || '...'}"</p>
 }
@@ -182,15 +202,79 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     setMessages((m) => [...m, { role: 'user', text }])
     const now = new Date()
     const { reply, action } = respond(text, { name: config.name, now })
-    setTimeout(() => {
-      setMessages((m) => [...m, { role: 'orion', text: reply }])
-      speak(reply, config.lang)
-    }, 300)
-    if (action && action.type === 'alarm') onAlarm(action)
-    if (action && action.type === 'memory') onMemory(action.text)
+    say(reply)
+    handleAction(action)
   }
 
-  const { listening, live, start } = useSpeech(handleInput, config.lang)
+  function say(text) {
+    setTimeout(() => {
+      setMessages((m) => [...m, { role: 'orion', text }])
+      speak(text, config.lang)
+    }, 300)
+  }
+
+  async function handleAction(action) {
+    if (!action) return
+    if (action.type === 'alarm') {
+      onAlarm(action)
+      return
+    }
+    if (action.type === 'memory') {
+      onMemory(action.text)
+      return
+    }
+    if (action.type === 'call') {
+      const ok = await doCall(action.number)
+      if (!ok) say('Call nahi ho paya — Settings mein "Calls" allow karo.')
+      return
+    }
+    if (action.type === 'sms') {
+      const ok = await doSms(action.number, action.text)
+      if (!ok) say('SMS nahi bhej saka — Settings mein "SMS" allow karo.')
+      return
+    }
+    if (action.type === 'open') {
+      const r = await openPackage(action.pkg)
+      if (r === 'not_connected') say('Pehle Accessibility ON karo — Settings > Pura Mobile Access > Accessibility.')
+      if (r === 'not_found') say('Ye app is phone par nahi mila.')
+      return
+    }
+    if (action.type === 'screen') {
+      const txt = await readScreen()
+      if (txt === null) {
+        say('Screen nahi parh saka — Accessibility ON nahi hai (Settings > Pura Mobile Access).')
+      } else {
+        const short = txt.split('\n').filter(Boolean).slice(0, 6).join(' | ') || 'Screen par koi text nahi mila.'
+        say('Screen par likha hai: ' + short)
+      }
+      return
+    }
+    if (action.type === 'notifs') {
+      const n = await getNotifications()
+      if (!n) {
+        say('Notifications nahi mili — Notification access Settings mein ON karo.')
+      } else {
+        const short = n.split('\n').slice(0, 5).join(' | ')
+        say('Notifications: ' + short)
+      }
+      return
+    }
+    if (action.type === 'type') {
+      const ok = await typeText(action.text)
+      if (!ok) say('Type nahi hua — pehle us field par tap karo jahan likhna hai.')
+      return
+    }
+    if (action.type === 'contacts') {
+      const cs = await getContacts()
+      if (!cs.length) {
+        say('Contacts nahi mili — Settings mein "Contacts" allow karo.')
+      } else {
+        say('Contacts mili: ' + cs.length + '. Bolo: "call 0300..." kisi ko.')
+      }
+    }
+  }
+
+  const { listening, live, err, start } = useSpeech(handleInput, config.lang)
 
   return (
     <div className="screen">
@@ -204,11 +288,11 @@ function ChatScreen({ config, onAlarm, onMemory }) {
         <div ref={endRef} />
       </div>
       <div className="micbar">
-        <LiveLine listening={listening} live={live} />
+        <LiveLine listening={listening} live={live} err={err} />
         <button className={`mic ${listening ? 'live' : ''}`} onClick={start}>
           {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
         </button>
-        <p className="mic-hint">Bolo: "Ros 12 baje utha dena" • "Yaad rakhna dawai 2 baje"</p>
+        <p className="mic-hint">Bolo: "12 baje utha dena" • "WhatsApp kholo" • "screen parho" • "call 03001234567"</p>
       </div>
     </div>
   )
@@ -344,6 +428,94 @@ function MemoryScreen({ notify }) {
   )
 }
 
+function AccessPanel({ notify }) {
+  const [status, setStatus] = useState(null)
+
+  async function refresh() {
+    setStatus(await getAccessStatus())
+  }
+
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  const rows = status
+    ? [
+        { key: 'mic', label: 'Microphone', on: status.mic },
+        { key: 'notifications', label: 'Notifications', on: status.notifications },
+        { key: 'call', label: 'Calls', on: status.call },
+        { key: 'sms', label: 'SMS', on: status.sms },
+        { key: 'contacts', label: 'Contacts', on: status.contacts },
+        { key: 'location', label: 'Location', on: status.location },
+        { key: 'storage', label: 'Files / Photos', on: status.storage }
+      ]
+    : []
+
+  return (
+    <div className="panel">
+      <h2>Pura Mobile Access</h2>
+      {rows.map((r) => (
+        <div key={r.key} className="perm-row">
+          <span className={`perm-dot ${r.on ? 'on' : ''}`} />
+          <span className="perm-label">{r.label}</span>
+          {r.on ? (
+            <span className="tag">ON</span>
+          ) : (
+            <button
+              className="perm-btn"
+              onClick={async () => {
+                await requestPerm(r.key)
+                notify('Popup par Allow dabao.')
+                setTimeout(refresh, 1500)
+              }}
+            >
+              Allow
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="perm-row">
+        <span className={`perm-dot ${status && status.accessibility ? 'on' : ''}`} />
+        <span className="perm-label">Accessibility — screen parhna, type, apps kholna</span>
+        {status && status.accessibility ? (
+          <span className="tag">ON</span>
+        ) : (
+          <button
+            className="perm-btn"
+            onClick={async () => {
+              await openAccessibilitySettings()
+              notify('Orion ko list mein ON karo.')
+              setTimeout(refresh, 2500)
+            }}
+          >
+            Enable
+          </button>
+        )}
+      </div>
+      <div className="perm-row">
+        <span className={`perm-dot ${status && status.notifListener ? 'on' : ''}`} />
+        <span className="perm-label">Notification access</span>
+        {status && status.notifListener ? (
+          <span className="tag">ON</span>
+        ) : (
+          <button
+            className="perm-btn"
+            onClick={async () => {
+              await openNotificationListenerSettings()
+              notify('Orion allow karo.')
+              setTimeout(refresh, 2500)
+            }}
+          >
+            Enable
+          </button>
+        )}
+      </div>
+      <button className="ghost" onClick={refresh}>Status refresh</button>
+      <p className="about">Sab ON karne ke baad bolo: "WhatsApp kholo" • "screen parho" • "call 0300..." • "sms 0300... lunch aa gaya" • "type kya haal hai"</p>
+    </div>
+  )
+}
+
 function SettingsScreen({ config, setConfig, notify }) {
   const [name, setName] = useState(config.name)
   const [lock, setLock] = useState(config.voiceLock)
@@ -404,6 +576,7 @@ function SettingsScreen({ config, setConfig, notify }) {
         <p className="about">Orion v1.1 — aapka AI bhai. Alarm, yaad-dasht, awaaz. Kuch bhi bolo.</p>
       </div>
       <PermissionsBox notify={notify} />
+      <AccessPanel notify={notify} />
     </div>
   )
 }
