@@ -818,3 +818,30 @@ body {
 .gate-sub {
   max-width: 340px;
 }
+
+/* ---------- Type input ---------- */
+.type-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.type-input {
+  flex: 1;
+}
+
+.send-btn {
+  width: 52px;
+  border: none;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  color: #fff;
+}
+
+.skip-btn {
+  max-width: 320px;
+  font-size: 13px;
+}

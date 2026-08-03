@@ -19,6 +19,7 @@ import {
 } from './services/access'
 import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
 import { groqReply, groqPing, rememberUser, rememberOrion } from './services/groq'
+import { subscribeSpeech, startListening, stopListening, speechAvailable, speechPermissionState } from './services/speech'
 import OrionAvatar from './components/OrionAvatar'
 
 const WAKE_NAMES = /orion|orian|aryan|arian|oren|aurion|orien|oreo|and wee|arion/i
@@ -59,83 +60,67 @@ function useSpeech(onFinal, lang = 'en-US') {
   const finalRef = useRef(onFinal)
   finalRef.current = onFinal
 
-  function setLiveText(t) {
-    liveRef.current = t
-    setLive(t)
-    if (t) setErr('')
-  }
-
   useEffect(() => {
-    const listeners = []
-    ;(async () => {
-      try {
-        await SpeechRecognition.requestPermissions()
-      } catch {}
-      if (!Capacitor.isNativePlatform()) return
-      listeners.push(await SpeechRecognition.addListener('onResult', (data) => {
+    const unsub = subscribeSpeech({
+      onResult: (t) => {
         gotFinalRef.current = true
-        setLiveText('')
-        if (data.matches && data.matches.length) finalRef.current(data.matches[0])
-      }))
-      listeners.push(await SpeechRecognition.addListener('partialResults', (data) => {
-        if (data.matches && data.matches.length) setLiveText(data.matches[0])
-      }))
-      listeners.push(await SpeechRecognition.addListener('onError', (data) => {
+        setLive('')
+        finalRef.current(t)
+      },
+      onPartial: (t) => {
+        liveRef.current = t
+        setLive(t)
+        setErr('')
+      },
+      onError: (d) => {
         gotFinalRef.current = true
-        setLiveText('')
-        setErr('Voice samajh nahi aayi (error ' + (data && data.error != null ? data.error : '?') + '). Mic permission ON hai? Google app installed hai?')
-      }))
-      listeners.push(await SpeechRecognition.addListener('onEnd', () => {
+        setLive('')
+        setErr('Voice error (' + (d && d.error != null ? d.error : '?') + '). Mic permission + Google app check karo.')
+      },
+      onEnd: () => {
         if (!gotFinalRef.current && liveRef.current) {
           finalRef.current(liveRef.current)
         }
         gotFinalRef.current = false
         listeningRef.current = false
         setListening(false)
-        setLiveText('')
-      }))
-    })()
-    return () => {
-      listeners.forEach((l) => l && l.remove())
-    }
+        setLive('')
+      }
+    })
+    return unsub
   }, [])
 
   async function start() {
     if (listeningRef.current) {
-      try {
-        await SpeechRecognition.stop()
-      } catch {}
+      await stopListening()
       listeningRef.current = false
       setListening(false)
-      setLiveText('')
+      setLive('')
       setErr('')
       return
     }
     if (!Capacitor.isNativePlatform()) {
       setListening(true)
       listeningRef.current = true
-      setLiveText('')
+      setLive('')
       setTimeout(() => {
         const t = window.prompt('Dev mode — boliye: Orion wake up')
         listeningRef.current = false
         setListening(false)
-        setLiveText('')
+        setLive('')
         if (t) finalRef.current(t)
       }, 300)
       return
     }
-    try {
-      await SpeechRecognition.start({ language: langRef.current, maxResults: 3, partialResults: true, popup: true })
-      listeningRef.current = true
-      setListening(true)
-      setLiveText('')
-      setErr('')
-    } catch (e) {
-      listeningRef.current = false
-      setListening(false)
-      setLiveText('')
-      setErr('Speech engine start nahi hua: ' + (e.message || 'unknown') + '. Google app check karo.')
+    setLive('')
+    setErr('')
+    const r = await startListening(langRef.current)
+    if (!r.ok) {
+      setErr('Mic start nahi hua: ' + (r.reason || 'unknown') + ' — Android Settings > Apps > Orion > Permissions mein Mic ON karo.')
+      return
     }
+    listeningRef.current = true
+    setListening(true)
   }
 
   return { listening, live, err, start }
@@ -208,6 +193,7 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     { role: 'orion', text: `Haan bhai ${config.name}, main Orion hun. Bolo — "12 baje utha dena", ya "yaad rakhna dinner lana", ya bas gupshup.` }
   ])
   const [avatar, setAvatar] = useState('idle')
+  const [typed, setTyped] = useState('')
   const endRef = useRef(null)
   const greetedRef = useRef(false)
 
@@ -267,22 +253,22 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     const local = respond(text, { name: config.name, now })
     handleAction(local.action)
     rememberUser(text)
-    if (config.groqKey) {
-      groqReply({ apiKey: config.groqKey, model: config.groqModel })
-        .then((reply) => {
-          if (reply) {
-            rememberOrion(reply)
-            say(reply)
-          } else {
-            say(local.reply)
-          }
-        })
-        .catch(() => say(local.reply))
-    } else if (config.apiUrl) {
-      remoteReply(text).then((reply) => say(reply || local.reply))
-    } else {
-      say(local.reply)
-    }
+    groqReply({ apiKey: config.groqKey, model: config.groqModel })
+      .then((reply) => {
+        if (reply) {
+          rememberOrion(reply)
+          say(reply)
+        } else {
+          say(local.reply)
+        }
+      })
+      .catch(() => say(local.reply))
+  }
+
+  function sendTyped() {
+    if (!typed.trim()) return
+    handleInput(typed)
+    setTyped('')
   }
 
   async function handleAction(action) {
@@ -366,10 +352,22 @@ function ChatScreen({ config, onAlarm, onMemory }) {
       </div>
       <div className="micbar">
         <LiveLine listening={listening} live={live} err={err} />
+        <div className="type-row">
+          <input
+            className="field type-input"
+            placeholder="Type karo... ya mic dabao"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') sendTyped()
+            }}
+          />
+          <button className="send-btn" onClick={sendTyped}>➤</button>
+        </div>
         <button className={`mic ${listening ? 'live' : ''}`} onClick={start}>
           {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
         </button>
-        <p className="mic-hint">Bolo: "12 baje utha dena" • "WhatsApp kholo" • "screen parho" • "call 03001234567" • "yaad rakhna..."</p>
+        <p className="mic-hint">Bolo ya likho: "12 baje utha dena" • "WhatsApp kholo" • "call 03001234567"</p>
       </div>
     </div>
   )
@@ -605,6 +603,7 @@ function SettingsScreen({ config, setConfig, notify }) {
   const [ownerOn, setOwnerOn] = useState(!!config.owner)
   const [ownerUser, setOwnerUser] = useState((config.owner && config.owner.user) || '')
   const [ownerPass, setOwnerPass] = useState('')
+  const [vh, setVh] = useState('')
 
   async function saveName() {
     const nm = name.trim() || 'Hannan'
@@ -671,6 +670,13 @@ function SettingsScreen({ config, setConfig, notify }) {
     }
   }
 
+  async function voiceHealth() {
+    setVh('Check ho raha hai...')
+    const avail = await speechAvailable()
+    const perm = await speechPermissionState()
+    setVh('Speech engine: ' + (avail ? 'OK — aawaaz sun sakta hun' : 'NAHI mila — Google app / Google Speech Service phone par install karo') + ' | Mic permission: ' + perm)
+  }
+
   return (
     <div className="screen">
       <div className="panel">
@@ -721,6 +727,8 @@ function SettingsScreen({ config, setConfig, notify }) {
 
         <button className="ghost" onClick={testVoice}>{testing ? 'Bol raha hun...' : 'Awaaz test karo'}</button>
         <button className="ghost" onClick={() => stopSpeaking()}>Bolna band karo</button>
+        <button className="ghost" onClick={voiceHealth}>Voice check karo (diagnostic)</button>
+        {vh && <p className="about">{vh}</p>}
 
         <p className="about">Orion v1.4 — body, login, AI brain. Aapka bhai.</p>
       </div>
@@ -887,6 +895,11 @@ function SetupScreen({ onDone, notify }) {
       </button>
       <LiveLine listening={listening} live={live} err={err} />
       {sample < 3 && <p className="gate-hint">Mic dabayen, phir bolo: hey Orion, ya Orion wake up, ya Orion suno</p>}
+      {sample < 3 && (
+        <button className="ghost skip-btn" onClick={() => setSample(3)}>
+          Awaaz nahi sun raha? Skip karo — type se bhi chale ga
+        </button>
+      )}
 
       {sample >= 3 && (
         <div className="setup-final">
