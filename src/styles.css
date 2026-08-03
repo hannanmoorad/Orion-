@@ -490,3 +490,331 @@ input[type='checkbox'] {
   z-index: 50;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
+
+/* ============ ORION BODY / GFX / VFX ============ */
+
+body {
+  background-color: #070b18;
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(108, 123, 255, 0.12), transparent 45%),
+    radial-gradient(circle at 85% 25%, rgba(155, 108, 255, 0.15), transparent 40%),
+    radial-gradient(circle at 50% 90%, rgba(52, 211, 153, 0.08), transparent 50%),
+    radial-gradient(1px 1px at 10% 20%, rgba(238, 241, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 30% 60%, rgba(238, 241, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 70% 35%, rgba(238, 241, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 90% 70%, rgba(238, 241, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 45% 15%, rgba(238, 241, 255, 0.3), transparent),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+  background-attachment: fixed;
+}
+
+.app {
+  background: linear-gradient(180deg, rgba(10, 14, 26, 0.55), rgba(16, 22, 43, 0.7));
+}
+
+.panel, .card {
+  background: rgba(22, 29, 54, 0.72);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(108, 123, 255, 0.12);
+}
+
+/* ---------- Orion Avatar ---------- */
+.orb {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.orb-sm {
+  width: 46px;
+  height: 46px;
+}
+
+.orb-body {
+  position: relative;
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 30%, #9db3ff, transparent 60%),
+    radial-gradient(circle at 70% 75%, #c0a6ff, transparent 55%),
+    linear-gradient(160deg, #2c3a8c, #171e46 60%, #241155);
+  box-shadow:
+    inset -8px -10px 22px rgba(0, 0, 0, 0.55),
+    inset 6px 8px 18px rgba(180, 200, 255, 0.25),
+    0 0 34px rgba(108, 123, 255, 0.55),
+    0 0 70px rgba(155, 108, 255, 0.28);
+  border: 1px solid rgba(180, 200, 255, 0.25);
+  animation: orbFloat 4s ease-in-out infinite;
+}
+
+.orb-shine {
+  position: absolute;
+  top: 12%;
+  left: 18%;
+  width: 34%;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.5), transparent 70%);
+  filter: blur(2px);
+}
+
+.orb-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.orb-eyes {
+  display: flex;
+  gap: 22px;
+}
+
+.orb-eye {
+  width: 13px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #dff1ff, #7fb0ff);
+  box-shadow: 0 0 12px rgba(160, 200, 255, 0.9);
+}
+
+.orb-sm .orb-eye {
+  width: 7px;
+  height: 12px;
+  border-radius: 4px;
+}
+
+.orb-mouth {
+  display: flex;
+  gap: 4px;
+  height: 22px;
+  align-items: flex-end;
+}
+
+.orb-sm .orb-mouth {
+  height: 10px;
+  gap: 2px;
+}
+
+.m-bar {
+  width: 7px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #7fb0ff, #b38bff);
+}
+
+.orb-sm .m-bar {
+  width: 4px;
+  height: 4px;
+}
+
+.orb.speaking .m-bar {
+  animation: mouth 360ms ease-in-out infinite alternate;
+}
+
+.orb.speaking .m-bar:nth-child(1), .orb.speaking .m-bar:nth-child(7) { animation-duration: 300ms; }
+.orb.speaking .m-bar:nth-child(2), .orb.speaking .m-bar:nth-child(6) { animation-duration: 400ms; transform-origin: bottom; }
+.orb.speaking .m-bar:nth-child(3), .orb.speaking .m-bar:nth-child(5) { animation-duration: 280ms; }
+.orb.speaking .m-bar:nth-child(4) { animation-duration: 460ms; }
+
+@keyframes mut {
+  from { transform: scaleY(0.4); }
+  to { transform: scaleY(1.5); }
+}
+
+.orb.speaking .m-bar { animation-name: mut; }
+
+.orb-halo {
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(108, 123, 255, 0.35), transparent 65%);
+  animation: halo 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.orb-ring {
+  position: absolute;
+  inset: -6%;
+  border-radius: 50%;
+  border: 2px dashed rgba(108, 123, 255, 0.35);
+  animation: spin 14s linear infinite;
+  pointer-events: none;
+}
+
+.orb-ring-2 {
+  inset: -20%;
+  border-color: rgba(155, 108, 255, 0.18);
+  animation-duration: 22s;
+  animation-direction: reverse;
+}
+
+.orb-sm .orb-ring, .orb-sm .orb-ring-2, .orb-sm .orb-halo {
+  inset: -30%;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes halo {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+@keyframes orbFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.orb.listening .orb-body {
+  animation: orbFloat 0.7s ease-in-out infinite;
+  box-shadow:
+    inset -8px -10px 22px rgba(0, 0, 0, 0.55),
+    inset 6px 8px 18px rgba(180, 200, 255, 0.25),
+    0 0 46px rgba(52, 211, 153, 0.65),
+    0 0 90px rgba(52, 211, 153, 0.3);
+  border-color: rgba(140, 255, 210, 0.5);
+}
+
+.orb.listening .orb-eye {
+  background: linear-gradient(180deg, #d6ffea, #46e6a8);
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.9);
+}
+
+.wave-bars {
+  position: absolute;
+  bottom: -14%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 26px;
+  pointer-events: none;
+}
+
+.wbar {
+  width: 5px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--ok), rgba(52, 211, 153, 0.2));
+  animation: wb 700ms ease-in-out infinite alternate;
+}
+
+.wb0 { height: 10px; }
+.wb1 { height: 22px; animation-delay: 120ms; }
+.wb2 { height: 14px; animation-delay: 240ms; }
+.wb3 { height: 24px; animation-delay: 60ms; }
+.wb4 { height: 10px; animation-delay: 300ms; }
+
+@keyframes wb {
+  from { transform: scaleY(0.5); }
+  to { transform: scaleY(1.2); }
+}
+
+.orb-sparkles { position: absolute; inset: 0; pointer-events: none; }
+.spark {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #cfe0ff;
+  box-shadow: 0 0 8px #cfe0ff;
+  opacity: 0;
+  animation: spark 4s ease-in-out infinite;
+}
+.s1 { top: 4%; left: 12%; animation-delay: 0s; }
+.s2 { top: 30%; right: 4%; animation-delay: 1.2s; }
+.s3 { bottom: 10%; left: 18%; animation-delay: 2s; }
+.s4 { top: 60%; right: 12%; animation-delay: 2.8s; }
+
+@keyframes spark {
+  0%, 80%, 100% { opacity: 0; transform: scale(0.5); }
+  40% { opacity: 1; transform: scale(1.3); }
+}
+
+.gate-logo {
+  font-size: 42px;
+  letter-spacing: 10px;
+  margin-top: 6px;
+}
+
+/* ---------- Login ---------- */
+.login-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.login-gate .field {
+  max-width: 320px;
+}
+
+.shake { animation: shake 0.5s; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-10px); }
+  40% { transform: translateX(10px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(6px); }
+}
+
+.big-btn {
+  max-width: 320px;
+}
+
+/* ---------- Header / chat ---------- */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brain-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--ok);
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  padding: 3px 9px;
+  border-radius: 8px;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 4px 0;
+}
+
+.chat-head-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-head-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.gate {
+  background: linear-gradient(180deg, rgba(10, 14, 26, 0.6), rgba(16, 22, 43, 0.7));
+}
+
+.gate-sub {
+  max-width: 340px;
+}

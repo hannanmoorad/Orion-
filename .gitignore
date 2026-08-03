@@ -12,3 +12,6 @@ platform-tools/
 Orion-APK.apk
 Orion-APK.zip
 apk-out/
+
+__pycache__/
+*.pyc

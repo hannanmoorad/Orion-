@@ -65,15 +65,18 @@ def time_human(dt=None):
 
 
 def llm_reply(text, name):
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    key = os.environ.get("BRAIN_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
     if not key:
         return None
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=key)
+        client = OpenAI(
+            api_key=key,
+            base_url=os.environ.get("BRAIN_URL", None),
+        )
         r = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=os.environ.get("BRAIN_MODEL", "llama-3.3-70b-versatile"),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": text},

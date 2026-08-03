@@ -18,8 +18,8 @@ import {
   getNotifications
 } from './services/access'
 import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
-
-const PHRASE = 'orion wake up'
+import { groqReply, groqPing, rememberUser, rememberOrion } from './services/groq'
+import OrionAvatar from './components/OrionAvatar'
 
 const WAKE_NAMES = /orion|orian|aryan|arian|oren|aurion|orien|oreo|and wee|arion/i
 const WAKE_VERBS = /wake( up)?|suno|sun|utho|utha|uth|listen|hey|hello|open|shuru|start|up/i
@@ -34,6 +34,17 @@ function matchesWake(s) {
   if (WAKE_NAMES.test(n)) return true
   if (WAKE_VERBS.test(" " + n + " ")) return true
   return n.includes('orion') && n.includes('wake')
+}
+
+async function hash256(s) {
+  try {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('orion::' + s))
+    return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    let h = 7
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+    return 'f' + (h >>> 0).toString(16)
+  }
 }
 
 function useSpeech(onFinal, lang = 'en-US') {
@@ -196,11 +207,32 @@ function ChatScreen({ config, onAlarm, onMemory }) {
   const [messages, setMessages] = useState([
     { role: 'orion', text: `Haan bhai ${config.name}, main Orion hun. Bolo — "12 baje utha dena", ya "yaad rakhna dinner lana", ya bas gupshup.` }
   ])
+  const [avatar, setAvatar] = useState('idle')
   const endRef = useRef(null)
+  const greetedRef = useRef(false)
 
   useEffect(() => {
     if (endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (greetedRef.current) return
+    greetedRef.current = true
+    const t = setTimeout(() => {
+      const greeting = `Subah bakhair ${config.name} bhai! Main Orion hun — aapka bhai. Bolo, kya karna hai?`
+      setAvatar('speaking')
+      setMessages((m) => [...m, { role: 'orion', text: greeting }])
+      speak(greeting, config.lang)
+      setTimeout(() => setAvatar('idle'), Math.max(2500, greeting.length * 70))
+    }, 900)
+    return () => clearTimeout(t)
+  }, [config.name, config.lang])
+
+  const { listening, live, err, start } = useSpeech(handleInput, config.lang)
+
+  useEffect(() => {
+    setAvatar(listening ? 'listening' : 'idle')
+  }, [listening])
 
   async function remoteReply(text) {
     if (!config.apiUrl) return null
@@ -218,6 +250,15 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     }
   }
 
+  function say(text) {
+    setTimeout(() => {
+      setMessages((m) => [...m, { role: 'orion', text }])
+      setAvatar('speaking')
+      speak(text, config.lang)
+      setTimeout(() => setAvatar('idle'), Math.max(2000, text.length * 70))
+    }, 300)
+  }
+
   function handleInput(raw) {
     if (!raw || !raw.trim()) return
     const text = raw.trim()
@@ -225,18 +266,23 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     const now = new Date()
     const local = respond(text, { name: config.name, now })
     handleAction(local.action)
-    if (config.apiUrl) {
+    rememberUser(text)
+    if (config.groqKey) {
+      groqReply({ apiKey: config.groqKey, model: config.groqModel })
+        .then((reply) => {
+          if (reply) {
+            rememberOrion(reply)
+            say(reply)
+          } else {
+            say(local.reply)
+          }
+        })
+        .catch(() => say(local.reply))
+    } else if (config.apiUrl) {
       remoteReply(text).then((reply) => say(reply || local.reply))
     } else {
       say(local.reply)
     }
-  }
-
-  function say(text) {
-    setTimeout(() => {
-      setMessages((m) => [...m, { role: 'orion', text }])
-      speak(text, config.lang)
-    }, 300)
   }
 
   async function handleAction(action) {
@@ -300,10 +346,15 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     }
   }
 
-  const { listening, live, err, start } = useSpeech(handleInput, config.lang)
-
   return (
     <div className="screen">
+      <div className="chat-head">
+        <OrionAvatar state={avatar} size="sm" />
+        <div className="chat-head-txt">
+          <strong>Orion — bhai</strong>
+          <span className="chat-head-sub">{listening ? 'Sun raha hun...' : 'Orion Brain ON'}</span>
+        </div>
+      </div>
       <div className="chat-body">
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
@@ -318,7 +369,7 @@ function ChatScreen({ config, onAlarm, onMemory }) {
         <button className={`mic ${listening ? 'live' : ''}`} onClick={start}>
           {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
         </button>
-        <p className="mic-hint">Bolo: "12 baje utha dena" • "WhatsApp kholo" • "screen parho" • "call 03001234567"</p>
+        <p className="mic-hint">Bolo: "12 baje utha dena" • "WhatsApp kholo" • "screen parho" • "call 03001234567" • "yaad rakhna..."</p>
       </div>
     </div>
   )
@@ -547,7 +598,13 @@ function SettingsScreen({ config, setConfig, notify }) {
   const [lock, setLock] = useState(config.voiceLock)
   const [lang, setLang] = useState(config.lang || 'en-US')
   const [server, setServer] = useState(config.apiUrl || '')
+  const [groqKey, setGroqKey] = useState(config.groqKey || '')
+  const [groqModel, setGroqModel] = useState(config.groqModel || 'llama-3.3-70b-versatile')
   const [testing, setTesting] = useState(false)
+  const [testMsg, setTestMsg] = useState('')
+  const [ownerOn, setOwnerOn] = useState(!!config.owner)
+  const [ownerUser, setOwnerUser] = useState((config.owner && config.owner.user) || '')
+  const [ownerPass, setOwnerPass] = useState('')
 
   async function saveName() {
     const nm = name.trim() || 'Hannan'
@@ -561,6 +618,13 @@ function SettingsScreen({ config, setConfig, notify }) {
     setConfig((c) => ({ ...c, apiUrl: url }))
     setJSON('config', { ...config, apiUrl: url })
     notify(url ? 'Orion server set: ' + url : 'Local brain chalta rahega.')
+  }
+
+  function saveGroq() {
+    const key = groqKey.trim()
+    setConfig((c) => ({ ...c, groqKey: key, groqModel }))
+    setJSON('config', { ...config, groqKey: key, groqModel })
+    notify(key ? 'Orion Brain updated — ab aur bhi acha samjhega!' : 'Orion Brain built-in mode par hai.')
   }
 
   function saveLang() {
@@ -577,10 +641,34 @@ function SettingsScreen({ config, setConfig, notify }) {
     notify(v ? 'Voice lock ON — sirf aapki awaaz kaam karegi.' : 'Voice lock OFF.')
   }
 
+  async function saveOwner() {
+    const nm = ownerUser.trim()
+    if (ownerOn && (!nm || ownerPass.length < 4)) {
+      notify('Username aur password (4+ characters) do.')
+      return
+    }
+    const next = ownerOn ? { user: nm, pass: await hash256(ownerPass || 'nopass') } : null
+    setConfig((c) => ({ ...c, owner: next }))
+    setJSON('config', { ...config, owner: next })
+    setOwnerPass('')
+    notify(next ? 'App lock ON — sirf ' + nm + ' login kar sakta hai.' : 'App lock OFF.')
+  }
+
   async function testVoice() {
     setTesting(true)
     await speak('Haan bhai! Main Orion hun, tumhara bhai. Ye meri awaaz hai.', config.lang)
     setTimeout(() => setTesting(false), 6000)
+  }
+
+  async function testBrain() {
+    setTestMsg('Soch raha hun...')
+    try {
+      const r = await groqPing({ apiKey: groqKey.trim(), model: groqModel })
+      setTestMsg('Orion jawab: ' + r)
+      await speak(r, config.lang)
+    } catch (e) {
+      setTestMsg('Brain fail: ' + (e.message || 'unknown'))
+    }
   }
 
   return (
@@ -590,6 +678,24 @@ function SettingsScreen({ config, setConfig, notify }) {
         <label className="lbl">Tumhara naam</label>
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="primary" onClick={saveName}>Naam save karo</button>
+
+        <label className="lbl">Orion Brain key (optional) — built-in brain pehle se ON hai</label>
+        <input
+          className="field"
+          type="password"
+          value={groqKey}
+          onChange={(e) => setGroqKey(e.target.value)}
+          placeholder="Koi key dalni ho to... (optional)"
+        />
+        <select className="field" value={groqModel} onChange={(e) => setGroqModel(e.target.value)}>
+          <option value="llama-3.3-70b-versatile">Orion Brain Pro — smartest</option>
+          <option value="llama-3.1-8b-instant">Orion Brain Fast</option>
+          <option value="gemma2-9b-it">Orion Brain Lite</option>
+          <option value="mixtral-8x7b-32768">Orion Brain Long Memory</option>
+        </select>
+        <button className="ghost" onClick={saveGroq}>Brain save karo</button>
+        <button className="ghost" onClick={testBrain} disabled={testing}>Test: Orion se kaho kuch</button>
+        {testMsg && <p className="about">{testMsg}</p>}
 
         <label className="lbl">Orion server (optional) — Python backend ka URL</label>
         <input
@@ -616,8 +722,24 @@ function SettingsScreen({ config, setConfig, notify }) {
         <button className="ghost" onClick={testVoice}>{testing ? 'Bol raha hun...' : 'Awaaz test karo'}</button>
         <button className="ghost" onClick={() => stopSpeaking()}>Bolna band karo</button>
 
-        <p className="about">Orion v1.3 — aapka AI bhai. Alarm, yaad-dasht, awaaz, apps, Python server. Kuch bhi bolo.</p>
+        <p className="about">Orion v1.4 — body, login, AI brain. Aapka bhai.</p>
       </div>
+
+      <div className="panel">
+        <h2>App lock (login)</h2>
+        <label className="row">
+          <input type="checkbox" checked={ownerOn} onChange={(e) => setOwnerOn(e.target.checked)} />
+          <span>App lock ON — sirf ID/pass wala login kar sakta hai</span>
+        </label>
+        {ownerOn && (
+          <div className="login-box">
+            <input className="field" placeholder="Username / ID" value={ownerUser} onChange={(e) => setOwnerUser(e.target.value)} />
+            <input className="field" type="password" placeholder="Password (4+)" value={ownerPass} onChange={(e) => setOwnerPass(e.target.value)} />
+          </div>
+        )}
+        <button className="ghost" onClick={saveOwner}>Login settings save karo</button>
+      </div>
+
       <PermissionsBox notify={notify} />
       <AccessPanel notify={notify} />
     </div>
@@ -627,6 +749,7 @@ function SettingsScreen({ config, setConfig, notify }) {
 function VoiceGate({ onUnlocked, notify, lang }) {
   const [tries, setTries] = useState(0)
   const [typed, setTyped] = useState('')
+  const [avatar, setAvatar] = useState('idle')
   const { listening, live, err, start } = useSpeech((t) => {
     if (matchesWake(t)) {
       notify('Mil gaya bhai!')
@@ -636,10 +759,15 @@ function VoiceGate({ onUnlocked, notify, lang }) {
     }
   }, lang)
 
+  useEffect(() => {
+    setAvatar(listening ? 'listening' : 'idle')
+  }, [listening])
+
   return (
     <div className="gate">
-      <h1>ORION</h1>
-      <p className="gate-sub">Voice lock ON hai. Bolo: "Orion wake up" — ya bas "hey Orion", "Orion suno"</p>
+      <OrionAvatar state={avatar} />
+      <h1 className="gate-logo">ORION</h1>
+      <p className="gate-sub">Voice lock ON hai. Bolo: "hey Orion" — ya "Orion suno", "orion wake up"</p>
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start}>
         {listening ? 'Sun raha hun...' : 'Mic dabao aur bolo'}
       </button>
@@ -671,10 +799,61 @@ function VoiceGate({ onUnlocked, notify, lang }) {
   )
 }
 
+function LoginScreen({ owner, onUnlocked, notify }) {
+  const [user, setUser] = useState('')
+  const [pass, setPass] = useState('')
+  const [shake, setShake] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  async function tryLogin() {
+    if (!user.trim() || !pass) {
+      notify('Username aur password likho.')
+      return
+    }
+    setBusy(true)
+    const h = await hash256(pass)
+    await new Promise((r) => setTimeout(r, 600))
+    setBusy(false)
+    if (user.trim().toLowerCase() === (owner.user || '').toLowerCase() && h === owner.pass) {
+      notify('Welcome back bhai!')
+      onUnlocked()
+    } else {
+      setShake((s) => s + 1)
+      setPass('')
+      notify('Galat ID ya pass — phir try karo.')
+    }
+  }
+
+  return (
+    <div className="gate login-gate">
+      <OrionAvatar state="idle" />
+      <h1 className="gate-logo">ORION</h1>
+      <p className="gate-sub">Private app — sirf owner ka ID/pass. Woh hi hai jo kahe: "main owner hoon".</p>
+      <div key={shake} className={shake ? 'login-box shake' : 'login-box'}>
+        <input className="field center" placeholder="Username / ID" value={user} onChange={(e) => setUser(e.target.value)} autoCapitalize="none" />
+        <input
+          className="field center"
+          type="password"
+          placeholder="Password"
+          value={pass}
+          onChange={(e) => setPass(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && tryLogin()}
+        />
+      </div>
+      <button className="primary big-btn" onClick={tryLogin} disabled={busy}>
+        {busy ? 'Check ho raha hai...' : 'Unlock karo'}
+      </button>
+    </div>
+  )
+}
+
 function SetupScreen({ onDone, notify }) {
   const [name, setName] = useState('Hannan')
   const [sample, setSample] = useState(0)
   const [lock, setLock] = useState(true)
+  const [loginOn, setLoginOn] = useState(true)
+  const [loginUser, setLoginUser] = useState('owner')
+  const [loginPass, setLoginPass] = useState('')
   const { listening, live, err, start } = useSpeech((t) => {
     if (sample >= 3) return
     if (matchesWake(t)) {
@@ -686,17 +865,23 @@ function SetupScreen({ onDone, notify }) {
 
   async function finish() {
     const nm = name.trim() || 'Hannan'
-    setJSON('config', { name: nm, voiceLock: lock, setupDone: true, samples: sample, lang: 'en-US' })
-    onDone()
+    if (loginOn && loginPass.length < 4) {
+      notify('Password kam hai — 4 characters ya zyada do.')
+      return
+    }
+    const owner = loginOn && loginUser.trim() ? { user: loginUser.trim(), pass: await hash256(loginPass) } : null
+    setJSON('config', { name: nm, voiceLock: lock, setupDone: true, samples: sample, lang: 'en-US', owner })
+    onDone(owner)
   }
 
   return (
     <div className="gate setup">
-      <h1>ORION</h1>
+      <OrionAvatar state={listening ? 'listening' : 'idle'} />
+      <h1 className="gate-logo">ORION</h1>
       <p className="gate-sub">Chalo pehle milte hain. Aapka naam?</p>
       <input className="field center" value={name} onChange={(e) => setName(e.target.value)} placeholder="Hannan" />
 
-      <p className="gate-group">Ab awaaz match karein — "Orion wake up" boliye, 3 baar:</p>
+      <p className="gate-group">Ab awaaz match karein — "hey Orion" boliye, 3 baar:</p>
       <button className={`mic big ${listening ? 'live' : ''}`} onClick={start} disabled={sample >= 3}>
         {listening ? 'Record ho raha hai...' : sample >= 3 ? 'Ho gaya!' : `Boliye: "hey Orion" — (${sample}/3)`}
       </button>
@@ -709,6 +894,16 @@ function SetupScreen({ onDone, notify }) {
             <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} />
             <span>Voice lock ON — sirf meri awaaz</span>
           </label>
+          <label className="row">
+            <input type="checkbox" checked={loginOn} onChange={(e) => setLoginOn(e.target.checked)} />
+            <span>App lock — ID/pass login (sirf aap kholein)</span>
+          </label>
+          {loginOn && (
+            <div className="login-box">
+              <input className="field" placeholder="Username / ID (kya hoga?)" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} />
+              <input className="field" type="password" placeholder="Password (4+ characters)" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} />
+            </div>
+          )}
           <PermissionsBox notify={notify} />
           <button className="primary" onClick={finish}>Orion shuru karo</button>
         </div>
@@ -745,7 +940,11 @@ export default function App() {
   }
 
   if (!config.setupDone) {
-    return <SetupScreen onDone={() => { setConfig((c) => ({ ...c, setupDone: true })); setUnlocked(true) }} notify={notify} />
+    return <SetupScreen onDone={(owner) => { setConfig((c) => ({ ...c, setupDone: true, owner })); setUnlocked(!owner) }} notify={notify} />
+  }
+
+  if (config.owner && !unlocked) {
+    return <LoginScreen owner={config.owner} onUnlocked={() => setUnlocked(true)} notify={notify} />
   }
 
   if (config.voiceLock && !unlocked) {
@@ -755,11 +954,17 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <div>
-          <h1 className="logo">ORION</h1>
-          <p className="logo-sub">aapka AI bhai — {config.name}</p>
+        <div className="header-left">
+          <OrionAvatar state={tab === 'chat' ? 'idle' : 'idle'} size="sm" />
+          <div>
+            <h1 className="logo">ORION</h1>
+            <p className="logo-sub">aapka AI bhai — {config.name}</p>
+          </div>
         </div>
-        <span className={`dot ${config.voiceLock && unlocked ? 'on' : ''}`} />
+        <div className="header-right">
+          <span className="brain-tag">BRAIN</span>
+          <span className={`dot ${config.voiceLock && unlocked ? 'on' : ''}`} />
+        </div>
       </header>
 
       <main className="main">

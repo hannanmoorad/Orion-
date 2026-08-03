@@ -29,6 +29,8 @@ jobs:
 
       - name: Build web
         run: npm run build
+        env:
+          VITE_ORION_BRAIN_KEY: ${{ secrets.ORION_BRAIN_KEY }}
 
       - name: Sync Capacitor
         run: npx cap sync android
