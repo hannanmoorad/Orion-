@@ -17,7 +17,7 @@ import {
   getContacts,
   getNotifications
 } from './services/access'
-import { respond, timeToHuman, defaultWakeMessage } from './brain/OrionBrain'
+import { respond, timeToHuman, defaultWakeMessage, PROACTIVE } from './brain/OrionBrain'
 import { groqReply, groqPing, rememberUser, rememberOrion } from './services/groq'
 import { subscribeSpeech, startListening, stopListening, speechAvailable, speechPermissionState } from './services/speech'
 import OrionAvatar from './components/OrionAvatar'
@@ -188,7 +188,7 @@ function PermissionsBox({ notify }) {
   )
 }
 
-function ChatScreen({ config, onAlarm, onMemory }) {
+function ChatScreen({ config, onAlarm, onMemory, notify }) {
   const [messages, setMessages] = useState([
     { role: 'orion', text: `Haan bhai ${config.name}, main Orion hun. Bolo — "12 baje utha dena", ya "yaad rakhna dinner lana", ya bas gupshup.` }
   ])
@@ -196,6 +196,22 @@ function ChatScreen({ config, onAlarm, onMemory }) {
   const [typed, setTyped] = useState('')
   const endRef = useRef(null)
   const greetedRef = useRef(false)
+  const listeningRef = useRef(false)
+
+  useEffect(() => {
+    listeningRef.current = listening
+  }, [listening])
+
+  useEffect(() => {
+    if (!config.proactive) return
+    const t = setInterval(() => {
+      if (listeningRef.current) return
+      const line = PROACTIVE[Math.floor(Math.random() * PROACTIVE.length)]
+      say(line)
+    }, 180000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.proactive])
 
   useEffect(() => {
     if (endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' })
@@ -240,7 +256,9 @@ function ChatScreen({ config, onAlarm, onMemory }) {
     setTimeout(() => {
       setMessages((m) => [...m, { role: 'orion', text }])
       setAvatar('speaking')
-      speak(text, config.lang)
+      speak(text, config.lang).catch(() => {
+        if (notify) notify('Awaaz nahi aa rahi — Google Text-to-Speech (Play Store se) install/update karo.')
+      })
       setTimeout(() => setAvatar('idle'), Math.max(2000, text.length * 70))
     }, 300)
   }
@@ -604,6 +622,7 @@ function SettingsScreen({ config, setConfig, notify }) {
   const [ownerUser, setOwnerUser] = useState((config.owner && config.owner.user) || '')
   const [ownerPass, setOwnerPass] = useState('')
   const [vh, setVh] = useState('')
+  const [pro, setPro] = useState(config.proactive !== false)
 
   async function saveName() {
     const nm = name.trim() || 'Hannan'
@@ -655,7 +674,12 @@ function SettingsScreen({ config, setConfig, notify }) {
 
   async function testVoice() {
     setTesting(true)
-    await speak('Haan bhai! Main Orion hun, tumhara bhai. Ye meri awaaz hai.', config.lang)
+    try {
+      await speak('Haan bhai! Main Orion hun, tumhara bhai. Ye meri awaaz hai.', config.lang)
+      notify('Awaaz test: chal rahi hai! Agar kuch nahi suna to Google Text-to-Speech update karo.')
+    } catch (e) {
+      notify('TTS fail: ' + (e.message || 'unknown') + ' — Google Text-to-Speech install karo.')
+    }
     setTimeout(() => setTesting(false), 6000)
   }
 
@@ -668,6 +692,14 @@ function SettingsScreen({ config, setConfig, notify }) {
     } catch (e) {
       setTestMsg('Brain fail: ' + (e.message || 'unknown'))
     }
+  }
+
+  function togglePro() {
+    const v = !pro
+    setPro(v)
+    setConfig((c) => ({ ...c, proactive: v }))
+    setJSON('config', { ...config, proactive: v })
+    notify(v ? 'Orion khud bolega — har 3 min mein kuch na kuch.' : 'Proactive bolna band.')
   }
 
   async function voiceHealth() {
@@ -723,6 +755,11 @@ function SettingsScreen({ config, setConfig, notify }) {
         <label className="row spacer">
           <input type="checkbox" checked={lock} onChange={toggleLock} />
           <span>Voice lock — sirf aapki awaaz ("hey Orion")</span>
+        </label>
+
+        <label className="row">
+          <input type="checkbox" checked={pro} onChange={togglePro} />
+          <span>Orion khud bole — har 3 min mein check-in</span>
         </label>
 
         <button className="ghost" onClick={testVoice}>{testing ? 'Bol raha hun...' : 'Awaaz test karo'}</button>
@@ -926,7 +963,7 @@ function SetupScreen({ onDone, notify }) {
 }
 
 export default function App() {
-  const [config, setConfig] = useState({ name: 'Hannan', voiceLock: true, setupDone: false, lang: 'en-US' })
+  const [config, setConfig] = useState({ name: 'Hannan', voiceLock: true, setupDone: false, lang: 'en-US', proactive: true })
   const [tab, setTab] = useState('chat')
   const [unlocked, setUnlocked] = useState(false)
   const [toast, setToast] = useState('')
@@ -981,7 +1018,7 @@ export default function App() {
       </header>
 
       <main className="main">
-        {tab === 'chat' && <ChatScreen config={config} onAlarm={handleAlarm} onMemory={handleMemory} />}
+        {tab === 'chat' && <ChatScreen config={config} onAlarm={handleAlarm} onMemory={handleMemory} notify={notify} />}
         {tab === 'alarm' && <AlarmScreen notify={notify} />}
         {tab === 'memory' && <MemoryScreen notify={notify} />}
         {tab === 'settings' && <SettingsScreen config={config} setConfig={setConfig} notify={notify} />}

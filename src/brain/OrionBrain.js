@@ -11,6 +11,16 @@ const FALLBACKS = [
 
 export const defaultWakeMessage = 'Hannan, uth ja bhai! Office jana hai.'
 
+export const PROACTIVE = [
+  'Bhai, haal kya hai? Aaj ka plan batao.',
+  'Bolo kuch — main kit-waited hoon, koi kaam ya gupshup?',
+  'Ache bhai, paani piya? Ye meri yaad-dasht hai.',
+  'Main yahan hoon. Alarm, reminder, app, call — bolo bhai.',
+  'Haaye, tumhari aawaz achi hai bhai. Aur bolo.',
+  'Kuch yaad dilana ho to batao, sab likh raha hun.',
+  'Bhai, restrict hoon — bas bolo "hey Orion" aur main chal padunga.'
+]
+
 export const APP_MAP = [
   { names: ['instagram', 'insta'], pkg: 'com.instagram.android' },
   { names: ['whatsapp', 'wap'], pkg: 'com.whatsapp' },
