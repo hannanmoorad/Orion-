@@ -17,8 +17,18 @@ export async function speak(text, lang = 'en-US') {
     rate: 1.0,
     pitch: 1.0,
     volume: 1.0,
-    category: 'alarm'
+    category: 'media'
   })
+}
+
+export async function ttsLanguages() {
+  try {
+    const r = await TextToSpeech.getSupportedLanguages()
+    const list = (r && r.languages ? r.languages : []) || []
+    return list.length
+  } catch (e) {
+    return 'ERR: ' + (e.message || e)
+  }
 }
 
 export async function stopSpeaking() {

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { SpeechRecognition } from '@capacitor-community/speech-recognition'
 import { getJSON, setJSON } from './services/storage'
-import { speak, stopSpeaking } from './services/voice'
+import { speak, stopSpeaking, ttsLanguages } from './services/voice'
 import { scheduleAlarm, cancelAlarm, OrionAlarm, requestNotificationPermission } from './services/alarm'
 import {
   getAccessStatus,
@@ -141,6 +141,33 @@ function EmptyState({ title, sub }) {
   )
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { err: null }
+  }
+
+  static getDerivedStateFromError(err) {
+    return { err }
+  }
+
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="gate crash">
+          <OrionAvatar state="idle" />
+          <h2 className="crash-title">Uff! Kuch bigad gaya</h2>
+          <p className="crash-msg">{String((this.state.err && this.state.err.message) || this.state.err)}</p>
+          <button className="primary big-btn" onClick={() => this.setState({ err: null })}>
+            Dobara try karo
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function TabBar({ tab, setTab }) {
   const items = [
     { key: 'chat', label: 'Chat' },
@@ -224,7 +251,9 @@ function ChatScreen({ config, onAlarm, onMemory, notify }) {
       const greeting = `Subah bakhair ${config.name} bhai! Main Orion hun — aapka bhai. Bolo, kya karna hai?`
       setAvatar('speaking')
       setMessages((m) => [...m, { role: 'orion', text: greeting }])
-      speak(greeting, config.lang)
+      speak(greeting, config.lang).catch(() => {
+        if (notify) notify('Awaaz engine nahi mila — Settings > Voice check karo.')
+      })
       setTimeout(() => setAvatar('idle'), Math.max(2500, greeting.length * 70))
     }, 900)
     return () => clearTimeout(t)
@@ -706,7 +735,14 @@ function SettingsScreen({ config, setConfig, notify }) {
     setVh('Check ho raha hai...')
     const avail = await speechAvailable()
     const perm = await speechPermissionState()
-    setVh('Speech engine: ' + (avail ? 'OK — aawaaz sun sakta hun' : 'NAHI mila — Google app / Google Speech Service phone par install karo') + ' | Mic permission: ' + perm)
+    const tts = await ttsLanguages()
+    setVh(
+      'Speech engine (sunne ke liye): ' +
+        (avail ? 'OK' : 'NAHI — Google app install karo') +
+        ' | Mic permission: ' + perm +
+        ' | TTS engine (bolne ke liye): ' +
+        (typeof tts === 'number' ? 'OK — ' + tts + ' languages' : tts)
+    )
   }
 
   return (
@@ -818,27 +854,31 @@ function VoiceGate({ onUnlocked, notify, lang }) {
       </button>
       <LiveLine listening={listening} live={live} err={err} />
       {tries > 0 && <p className="gate-hint">Nahi samjha — phir se bolo, ya neeche type karo.</p>}
-      {tries >= 1 && (
-        <div className="gate-typed">
-          <input
-            className="field center"
-            placeholder='Type karo: "orion"'
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-          />
-          <button
-            className="ghost"
-            onClick={() => {
-              if (typed.trim()) {
-                notify('Mil gaya bhai!')
-                onUnlocked()
-              }
-            }}
-          >
-            Unlock karo
-          </button>
-        </div>
-      )}
+      <div className="gate-typed">
+        <input
+          className="field center"
+          placeholder='Type karo: "orion" (ya koi bhi wake word)'
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && typed.trim()) {
+              notify('Mil gaya bhai!')
+              onUnlocked()
+            }
+          }}
+        />
+        <button
+          className="ghost"
+          onClick={() => {
+            if (typed.trim()) {
+              notify('Mil gaya bhai!')
+              onUnlocked()
+            }
+          }}
+        >
+          Unlock karo
+        </button>
+      </div>
       <p className="gate-hint">Awaaz pakad nahi rahi? Mic permission + Google app check karo, ya Settings mein "Voice lock" OFF kar do.</p>
     </div>
   )
@@ -966,6 +1006,7 @@ export default function App() {
   const [config, setConfig] = useState({ name: 'Hannan', voiceLock: true, setupDone: false, lang: 'en-US', proactive: true })
   const [tab, setTab] = useState('chat')
   const [unlocked, setUnlocked] = useState(false)
+  const [loginDone, setLoginDone] = useState(false)
   const [toast, setToast] = useState('')
 
   useEffect(() => {
@@ -990,19 +1031,32 @@ export default function App() {
   }
 
   if (!config.setupDone) {
-    return <SetupScreen onDone={(owner) => { setConfig((c) => ({ ...c, setupDone: true, owner })); setUnlocked(!owner) }} notify={notify} />
+    return (
+      <ErrorBoundary>
+        <SetupScreen onDone={(owner) => { setConfig((c) => ({ ...c, setupDone: true, owner })); setUnlocked(!owner); setLoginDone(!!owner) }} notify={notify} />
+      </ErrorBoundary>
+    )
   }
 
   if (config.owner && !unlocked) {
-    return <LoginScreen owner={config.owner} onUnlocked={() => setUnlocked(true)} notify={notify} />
+    return (
+      <ErrorBoundary>
+        <LoginScreen owner={config.owner} onUnlocked={() => { setUnlocked(true); setLoginDone(true) }} notify={notify} />
+      </ErrorBoundary>
+    )
   }
 
-  if (config.voiceLock && !unlocked) {
-    return <VoiceGate onUnlocked={() => setUnlocked(true)} notify={notify} lang={config.lang} />
+  if (config.voiceLock && !unlocked && !loginDone) {
+    return (
+      <ErrorBoundary>
+        <VoiceGate onUnlocked={() => setUnlocked(true)} notify={notify} lang={config.lang} />
+      </ErrorBoundary>
+    )
   }
 
   return (
-    <div className="app">
+    <ErrorBoundary>
+      <div className="app">
       <header className="header">
         <div className="header-left">
           <OrionAvatar state={tab === 'chat' ? 'idle' : 'idle'} size="sm" />
@@ -1026,6 +1080,7 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
       <TabBar tab={tab} setTab={setTab} />
-    </div>
+      </div>
+    </ErrorBoundary>
   )
 }
