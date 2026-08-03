@@ -55,7 +55,7 @@ public class OrionAccessPlugin extends Plugin {
     }
 
     private boolean isNotifListenerOn() {
-        return isEnabled(Settings.Secure.ENABLED_NOTIFICATION_LISTENERS);
+        return isEnabled("enabled_notification_listeners");
     }
 
     @PluginMethod
